@@ -1,0 +1,11 @@
+---
+title: "r-datawrapper-workflow"
+---
+
+## Datawrapper workflow
+
+This document represents an attempt to define a workflow for batch-creating Datawrapper charts and maps directly from data sets in an R environment. The ultimate goal would be to create a final pre-publishing step for RMarkdown and Quarto web publishing workflows to include better web-ready visualizations than what can be produced with R's built in tools and packages like ggplot and map-viewer.
+
+```{r}
+1 + 1
+```
