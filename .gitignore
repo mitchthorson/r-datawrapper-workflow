@@ -2,3 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.r-datawrapper-workflow_files/
+.r-datawrapper-workflow.html
+
+/.quarto/

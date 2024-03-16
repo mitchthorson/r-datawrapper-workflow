@@ -6,6 +6,149 @@ title: "r-datawrapper-workflow"
 
 This document represents an attempt to define a workflow for batch-creating Datawrapper charts and maps directly from data sets in an R environment. The ultimate goal would be to create a final pre-publishing step for RMarkdown and Quarto web publishing workflows to include better web-ready visualizations than what can be produced with R's built in tools and packages like ggplot and map-viewer.
 
+For starter's we'll work with some of the Urban Institute's [Upward Mobility Framework data](https://upward-mobility.urban.org/).
+
+In order to do this, we'll need to load a few libraries.
+
 ```{r}
-1 + 1
+#| output: false
+library(tidyverse)
+library(DatawRappr)
 ```
+
+And we'll need some data. We'll download the latest county data file from the [Urban Institute's data catalog](https://datacatalog.urban.org/dataset/boosting-upward-mobility-metrics-inform-local-action-10).
+
+```{r}
+mobility_metrics_county_data <- read_csv("https://urban-data-catalog.s3.amazonaws.com/drupal-root-live/2023/04/28/00_mobility-metrics_longitudinal.csv", show_col_types = FALSE) %>%
+  mutate(fips = paste0(state, county), .before = state)
+
+# preview resulting data table
+mobility_metrics_county_data %>% slice_sample(n = 10)
+```
+
+For now, we're primarily interested in just the most recent year of data for each metric. We'll grab that with a simple method:
+
+```{r}
+mobility_metrics_county_latest <- mobility_metrics_county_data %>%
+	group_by(fips) %>%
+	fill(
+		7:92
+	) %>%
+	select(-year, -state, -county) %>% # year is no longer accurate, since we are just taking the latest from each column
+	slice_tail() %>%
+	ungroup()
+
+mobility_metrics_county_latest %>% slice_sample()
+```
+
+Ok, let's specify which metrics we want to map.
+
+```{r}
+metrics_to_map <- c("share_digital_access", "share_hs_degree", "index_transit_trips")
+```
+
+Let's quickly map these with one of R's built in tools to preview our data. This is representative of how an R user might do this in a typical project. We'll use the excellent spatial-r package mapview. Let's load that up first, and let's also download some geographic boundary files we'll need to join our data with in order to map them.
+
+```{r}
+#| output: FALSE
+library(mapview)
+library(tigris)
+library(sf)
+options(tigris_use_cache = TRUE)
+```
+
+Let's download county geography:
+
+```{r}
+county_geo <- tigris::counties(cb = TRUE, year = 2018) %>%
+  select(fips = GEOID, geometry)
+```
+
+And join it to our Upward Mobility data, focusing on our variables to map.
+
+```{r}
+metrics_geo <- mobility_metrics_county_latest %>%
+  select(1:3, all_of(metrics_to_map)) %>%
+  inner_join(county_geo, by = "fips") %>%
+  st_as_sf()
+```
+
+And let's see what a map might look like:
+
+```{r}
+metrics_geo %>%
+  mapview(
+    zcol = metrics_to_map[1]
+  )
+```
+
+This type of map is wonderful when working on analysis. It gives you a quick and easy way to confirm that your data is joined correctly to geography, it allows you explore data spatially and identify any geographic patterns.
+
+Sharing this as-is as part of a Quarto publishing workflow could be just fine, but there a few limitations that may be an issue:
+
+- The projection is locked into the Leaflet standard WebMercator
+- The base map, while effective and not problematic, is generic and not customizable to match brand style guides
+- The map's generated output is heavy and not optimized for good web UX, particularly when combined with multiple outputs and embedded on an existing website
+- The legend includes all necessary details but is visually heavy and obscures part of the map
+
+
+We could certainly update the color pallete of the county layer to match our brand guidelines, but we can only get so far with these tools. So let's see what Datawrapper might have to offer us. The author of the `DatawRappr` package has a [useful walkthrough](https://munichrocker.github.io/DatawRappr/articles/map.html) that can inform our next steps.
+
+Datawrapper supports [many different geographies out of the box for choropleth maps](https://www.datawrapper.de/maps/choropleth-map). The `DatawRappr` package gives us a lsit of the options available for reference. Let's take a look at those now:
+
+```{r}
+dw_basemaps %>% 
+  filter(grepl("us-counties", id))
+```
+
+
+The `us-counties-2018` options sounds like the perfect match for the map we're looking to make. We're going to work inside a folder we've setup in Datawrapper for this project ahead of time.
+
+```{r}
+dw_folder_id <- "230222"
+
+# we only want to make this map once, so if it already exists, we'll skip
+if (!exists("dw_choropleth_map")) {
+  dw_choropleth_map <- dw_create_chart(
+    title = "My new choropleth map",
+    folderId = dw_folder_id,
+    type = "d3-maps-choropleth"
+  )
+}
+```
+
+
+Now we need to edit some details for the chart:
+
+```{r}
+
+data_for_dw <- mobility_metrics_county_latest %>%
+  select(fips, all_of(metrics_to_map))
+  
+
+dw_data_to_chart(
+  data_for_dw,
+  chart_id = dw_choropleth_map,
+)
+
+dw_edit_chart(
+  dw_choropleth_map,
+  data = list(
+    "column-format" = list(
+      "fips" = list(
+        type = "text"
+      )
+    )
+  ),
+  axes = list(
+    keys = "fips",
+    values = metrics_to_map[1]
+  ),
+  visualize = list(
+    basemap = "us-counties-2018",
+    "map-key-attr" = "GEOID"
+  )
+)
+
+```
+
