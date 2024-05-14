@@ -1,14 +1,17 @@
 ---
-title: "r-datawrapper-workflow"
+title: "An R workflow for creating Datawrapper charts and maps"
+author: "Mitchell Thorson"
+format: html
 ---
 
-## Datawrapper workflow
+This notebook documents a workflow for creating [Datawrapper](https://www.datawrapper.de/) charts and maps directly from data sets in an R environment. Datawrapper is a tool focused on publishing web-based visualizations that are mobile-friendly, and designed to fit well in a web page. Urban Institute uses Datawrapper for publishing simple interactive [charts](https://apps.urban.org/features/wealth-inequality-charts/) and [maps](https://www.urban.org/projects/immigrants-safety-net-access).
 
-This document represents an attempt to define a workflow for batch-creating Datawrapper charts and maps directly from data sets in an R environment. The ultimate goal would be to create a final pre-publishing step for RMarkdown and Quarto web publishing workflows to include better web-ready visualizations than what can be produced with R's built in tools and packages like ggplot and map-viewer.
 
-For starter's we'll work with some of the Urban Institute's [Upward Mobility Framework data](https://upward-mobility.urban.org/).
+## Setting up
 
-In order to do this, we'll need to load a few libraries.
+In order to do this, we'll need to use a few libraries, including Tidyverse for basic data manipulation and [DatawRappr](https://github.com/munichrocker/DatawRappr) for interacting with the Datawrapper API. Note that the DatawRappr library is not available on CRAN and needs to be installed directly from Github. Follow the directions in the repo if you need to install it.
+
+Once you have everything installed, load the libraries:
 
 ```{r}
 #| output: false
@@ -16,17 +19,30 @@ library(tidyverse)
 library(DatawRappr)
 ```
 
+To interact with the Datawrapper API, you'll also need to provide an API key. You can create an access token in your [Datawrapper account settings](https://developer.datawrapper.de/docs/getting-started). You can then authenticate in R by running:
+
+```{r}
+#| eval: FALSE
+datawrapper_auth(api_key = "API_KEY_HERE")
+```
+
+## Preparing data
+
+Now that everything is setup, let's load some data.
+
+For starter's we'll work with some of the Urban Institute's [Upward Mobility Framework data](https://upward-mobility.urban.org/).
+
 And we'll need some data. We'll download the latest county data file from the [Urban Institute's data catalog](https://datacatalog.urban.org/dataset/boosting-upward-mobility-metrics-inform-local-action-10).
 
 ```{r}
 mobility_metrics_county_data <- read_csv("https://urban-data-catalog.s3.amazonaws.com/drupal-root-live/2023/04/28/00_mobility-metrics_longitudinal.csv", show_col_types = FALSE) %>%
-  mutate(fips = paste0(state, county), .before = state)
+  mutate(fips = paste0(state, county), .before = state) # Adding a FIPS code for joining to geography later
 
 # preview resulting data table
 mobility_metrics_county_data %>% slice_sample(n = 10)
 ```
 
-For now, we're primarily interested in just the most recent year of data for each metric. We'll grab that with a simple method:
+For now, we're primarily interested in just the most recent year of data for each metric:
 
 ```{r}
 mobility_metrics_county_latest <- mobility_metrics_county_data %>%
@@ -41,58 +57,24 @@ mobility_metrics_county_latest <- mobility_metrics_county_data %>%
 mobility_metrics_county_latest %>% slice_sample()
 ```
 
-Ok, let's specify which metrics we want to map.
+Ok, let's specify which metrics we want to visualize.
 
 ```{r}
-metrics_to_map <- c("share_digital_access", "share_hs_degree", "index_transit_trips")
+metrics_to_map <- c("index_air_quality")
 ```
 
-Let's quickly map these with one of R's built in tools to preview our data. This is representative of how an R user might do this in a typical project. We'll use the excellent spatial-r package mapview. Let's load that up first, and let's also download some geographic boundary files we'll need to join our data with in order to map them.
+## Creating a choropleth map
 
-```{r}
-#| output: FALSE
-library(mapview)
-library(tigris)
-library(sf)
-options(tigris_use_cache = TRUE)
-```
+At this stage, we could fairly easily create a map using `ggplot` or another packages like `mapview`. These types of maps are wonderful when working on analysis. They gives you a quick and easy way to confirm that your data is joined correctly to geography, they allow you to explore data spatially and identify any geographic patterns.
 
-Let's download county geography:
+But when it comes to publishing maps on the web, there a few limitations that may be an issue with one of these map formats:
 
-```{r}
-county_geo <- tigris::counties(cb = TRUE, year = 2018) %>%
-  select(fips = GEOID, geometry)
-```
+-   When using `leaflet` or `mapview`, the projection is locked into the standard WebMercator
+-   The base map, while effective and a useful default, is generic and not customizable to match brand style guides
+-   The map's generated output is heavy and not optimized for good web UX, particularly when combined with multiple outputs and embedded on an existing website
+-   The legend includes all necessary details but is visually heavy and obscures part of the map
 
-And join it to our Upward Mobility data, focusing on our variables to map.
-
-```{r}
-metrics_geo <- mobility_metrics_county_latest %>%
-  select(1:3, all_of(metrics_to_map)) %>%
-  inner_join(county_geo, by = "fips") %>%
-  st_as_sf()
-```
-
-And let's see what a map might look like:
-
-```{r}
-metrics_geo %>%
-  mapview(
-    zcol = metrics_to_map[1]
-  )
-```
-
-This type of map is wonderful when working on analysis. It gives you a quick and easy way to confirm that your data is joined correctly to geography, it allows you explore data spatially and identify any geographic patterns.
-
-Sharing this as-is as part of a Quarto publishing workflow could be just fine, but there a few limitations that may be an issue:
-
-- The projection is locked into the Leaflet standard WebMercator
-- The base map, while effective and not problematic, is generic and not customizable to match brand style guides
-- The map's generated output is heavy and not optimized for good web UX, particularly when combined with multiple outputs and embedded on an existing website
-- The legend includes all necessary details but is visually heavy and obscures part of the map
-
-
-We could certainly update the color pallete of the county layer to match our brand guidelines, but we can only get so far with these tools. So let's see what Datawrapper might have to offer us. The author of the `DatawRappr` package has a [useful walkthrough](https://munichrocker.github.io/DatawRappr/articles/map.html) that can inform our next steps.
+So let's see how we can create our map with Datawrapper instead.
 
 Datawrapper supports [many different geographies out of the box for choropleth maps](https://www.datawrapper.de/maps/choropleth-map). The `DatawRappr` package gives us a lsit of the options available for reference. Let's take a look at those now:
 
@@ -101,38 +83,43 @@ dw_basemaps %>%
   filter(grepl("us-counties", id))
 ```
 
-
 The `us-counties-2018` options sounds like the perfect match for the map we're looking to make. We're going to work inside a folder we've setup in Datawrapper for this project ahead of time.
 
 ```{r}
-dw_folder_id <- "230222"
+dw_folder_id <- "210927"
+map_title <- "Air Quality Index by County"
+map_source <- "<a href='https://datacatalog.urban.org/dataset/boosting-upward-mobility-metrics-inform-local-action-10' target='_blank' >Urban Institute's Upward Mobility Framework</a>"
 
-# we only want to make this map once, so if it already exists, we'll skip
+# create the map in Datawrapper
 if (!exists("dw_choropleth_map")) {
   dw_choropleth_map <- dw_create_chart(
-    title = "My new choropleth map",
+    title = map_title,
     folderId = dw_folder_id,
     type = "d3-maps-choropleth"
   )
 }
 ```
 
-
 Now we need to edit some details for the chart:
 
 ```{r}
 
+# format data for Datawrapper map
 data_for_dw <- mobility_metrics_county_latest %>%
-  select(fips, all_of(metrics_to_map))
-  
+  select(fips, county_name, state_name, all_of(metrics_to_map))
 
+# upload data to chart
 dw_data_to_chart(
   data_for_dw,
   chart_id = dw_choropleth_map,
 )
 
+# edit some of the chart details
 dw_edit_chart(
   dw_choropleth_map,
+  describe = list(
+    "source-name" = map_source
+  ),
   data = list(
     "column-format" = list(
       "fips" = list(
@@ -146,9 +133,29 @@ dw_edit_chart(
   ),
   visualize = list(
     basemap = "us-counties-2018",
-    "map-key-attr" = "GEOID"
+    "map-key-attr" = "GEOID",
+    tooltip = list(
+      "body" = "Air quality index: {{index_air_quality}}",
+      "title" = "{{county_name}}, {{state_name}}"
+    )
   )
 )
 
-```
+# publish the chart
+dw_publish_chart(dw_choropleth_map)
 
+```
+And let's take a look at our new map:
+
+```{r results="asis"}
+chart_id <- dw_choropleth_map$id
+
+embed_html <- sprintf(
+  '<iframe title="%s" aria-label="Map" id="datawrapper-chart-%s" src="https://datawrapper.dwcdn.net/%s/" scrolling="no" frameborder="0" style="width: 0; min-width: 100%% !important; border: none;" height="400" data-external="1"></iframe><script type="text/javascript">!function(){"use strict";window.addEventListener("message",(function(a){if(void 0!==a.data["datawrapper-height"]){var e=document.querySelectorAll("iframe");for(var t in a.data["datawrapper-height"])for(var r=0;r<e.length;r++)if(e[r].contentWindow===a.source){var i=a.data["datawrapper-height"][t]+"px";e[r].style.height=i}}}))}();</script>',
+  map_title,
+  chart_id,
+  chart_id
+)
+
+cat(embed_html)
+```
