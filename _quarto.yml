@@ -1,5 +1,6 @@
 project:
   title: "r-datawrapper-workflow"
+  output-dir: "dist"
 
 editor: visual
 
