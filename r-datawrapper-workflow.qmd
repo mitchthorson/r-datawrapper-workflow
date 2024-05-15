@@ -87,6 +87,7 @@ The `us-counties-2018` options sounds like the perfect match for the map we're l
 
 ```{r}
 dw_folder_id <- "210927"
+basemap_id <- "us-counties-2018"
 map_title <- "Air Quality Index by County"
 map_source <- "<a href='https://datacatalog.urban.org/dataset/boosting-upward-mobility-metrics-inform-local-action-10' target='_blank' >Urban Institute's Upward Mobility Framework</a>"
 
@@ -132,7 +133,7 @@ dw_edit_chart(
     values = metrics_to_map[1]
   ),
   visualize = list(
-    basemap = "us-counties-2018",
+    basemap = basemap_id,
     "map-key-attr" = "GEOID",
     tooltip = list(
       "body" = "Air quality index: {{index_air_quality}}",
